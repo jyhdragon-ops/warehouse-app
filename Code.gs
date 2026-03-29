@@ -3,9 +3,11 @@
 // 시트 구성: 1) 입출고 기록  2) 재고 현황  3) 품목 관리
 // ================================================================
 
-const SHEET_RECORD = '입출고 기록';
-const SHEET_STOCK  = '재고 현황';
-const SHEET_ITEMS  = '품목 관리';
+const SHEET_RECORD      = '입출고 기록';
+const SHEET_STOCK       = '재고 현황';
+const SHEET_ITEMS       = '품목 관리';
+const SHEET_STATS       = '통계';
+const SHEET_LEADERBOARD = '리드보드';
 
 // ── 메뉴 등록 ──────────────────────────────────────────────────
 function onOpen() {
@@ -17,7 +19,9 @@ function onOpen() {
     .addItem('➖ 출고 등록', 'showOutboundDialog')
     .addSeparator()
     .addItem('🔄 재고 현황 갱신', 'refreshStock')
-    .addItem('📊 품목 목록 갱신', 'refreshItems')
+    .addItem('📊 통계 갱신', 'refreshStats')
+    .addItem('🏆 리드보드 갱신', 'refreshLeaderboard')
+    .addItem('📋 품목 목록 갱신', 'refreshItems')
     .addToUi();
 }
 
@@ -34,10 +38,14 @@ function initSystem() {
   _deleteSheet(ss, SHEET_RECORD);
   _deleteSheet(ss, SHEET_STOCK);
   _deleteSheet(ss, SHEET_ITEMS);
+  _deleteSheet(ss, SHEET_STATS);
+  _deleteSheet(ss, SHEET_LEADERBOARD);
 
   _createRecordSheet(ss);
   _createStockSheet(ss);
   _createItemsSheet(ss);
+  _createStatsSheet(ss);
+  _createLeaderboardSheet(ss);
 
   _styleHeaders(ss);
 
@@ -324,6 +332,279 @@ function refreshStock() {
   }
 
   SpreadsheetApp.getUi().alert(`✅ 재고 현황 갱신 완료!\n총 ${rows.length}개 품목`);
+}
+
+// ================================================================
+// ================================================================
+// 4) 통계 시트 생성
+// ================================================================
+function _createStatsSheet(ss) {
+  const sheet = ss.insertSheet(SHEET_STATS);
+
+  sheet.getRange('A1:G1').merge()
+    .setValue('📊 입출고 통계')
+    .setFontSize(16).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle')
+    .setBackground('#E65100').setFontColor('#ffffff');
+  sheet.setRowHeight(1, 45);
+
+  sheet.getRange('A2:G2').merge()
+    .setValue('※ [📦 입출고 관리] → [통계 갱신] 버튼을 누르면 자동으로 업데이트됩니다.')
+    .setFontSize(10).setFontColor('#777777').setBackground('#FFF3E0').setHorizontalAlignment('center');
+  sheet.setRowHeight(2, 24);
+
+  // 월별 집계 헤더
+  sheet.getRange('A3:G3').merge()
+    .setValue('▶ 월별 입출고 집계')
+    .setFontSize(12).setFontWeight('bold').setBackground('#BF360C').setFontColor('#ffffff')
+    .setVerticalAlignment('middle');
+  sheet.setRowHeight(3, 26);
+
+  const monthHeaders = [['연월', '입고 건수', '입고 수량', '출고 건수', '출고 수량', '순증감', '비고']];
+  sheet.getRange('A4:G4').setValues(monthHeaders)
+    .setBackground('#FF8A65').setFontColor('#ffffff').setFontWeight('bold')
+    .setHorizontalAlignment('center').setFontSize(11);
+  sheet.setRowHeight(4, 24);
+
+  // 일별 집계 헤더 (월별 데이터 아래에 동적으로 추가됨 — 갱신 시 위치 결정)
+  sheet.setColumnWidth(1, 90); sheet.setColumnWidth(2, 80); sheet.setColumnWidth(3, 90);
+  sheet.setColumnWidth(4, 80); sheet.setColumnWidth(5, 90); sheet.setColumnWidth(6, 80);
+  sheet.setColumnWidth(7, 100);
+  sheet.setFrozenRows(4);
+}
+
+// ================================================================
+// 5) 리드보드 시트 생성
+// ================================================================
+function _createLeaderboardSheet(ss) {
+  const sheet = ss.insertSheet(SHEET_LEADERBOARD);
+
+  sheet.getRange('A1:F1').merge()
+    .setValue('🏆 리드보드')
+    .setFontSize(16).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle')
+    .setBackground('#1A237E').setFontColor('#FFD700');
+  sheet.setRowHeight(1, 45);
+
+  sheet.getRange('A2:F2').merge()
+    .setValue('※ [📦 입출고 관리] → [리드보드 갱신] 버튼을 누르면 자동으로 업데이트됩니다.')
+    .setFontSize(10).setFontColor('#777777').setBackground('#E8EAF6').setHorizontalAlignment('center');
+  sheet.setRowHeight(2, 24);
+
+  sheet.setColumnWidth(1, 50);  sheet.setColumnWidth(2, 170);
+  sheet.setColumnWidth(3, 100); sheet.setColumnWidth(4, 90);
+  sheet.setColumnWidth(5, 90);  sheet.setColumnWidth(6, 90);
+  sheet.setFrozenRows(2);
+}
+
+// ================================================================
+// 통계 갱신
+// ================================================================
+function refreshStats() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const recordSheet = ss.getSheetByName(SHEET_RECORD);
+  const statsSheet  = ss.getSheetByName(SHEET_STATS);
+  if (!recordSheet || !statsSheet) {
+    SpreadsheetApp.getUi().alert('먼저 시스템을 초기화해주세요.');
+    return;
+  }
+
+  const lastRow = recordSheet.getLastRow();
+  if (lastRow < 6) {
+    SpreadsheetApp.getUi().alert('입출고 기록 데이터가 없습니다.');
+    return;
+  }
+
+  const data = recordSheet.getRange(6, 1, lastRow - 5, 10).getValues();
+
+  // 월별 집계
+  const monthMap = {};
+  data.forEach(row => {
+    const date = row[1]; if (!date) return;
+    const d = (date instanceof Date) ? date : new Date(date);
+    if (isNaN(d)) return;
+    const ym = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM');
+    const inQty  = Number(row[6]) || 0;
+    const outQty = Number(row[7]) || 0;
+    if (!monthMap[ym]) monthMap[ym] = { inCnt: 0, inQty: 0, outCnt: 0, outQty: 0 };
+    if (inQty  > 0) { monthMap[ym].inCnt++;  monthMap[ym].inQty  += inQty;  }
+    if (outQty > 0) { monthMap[ym].outCnt++; monthMap[ym].outQty += outQty; }
+  });
+
+  // 기존 데이터 삭제 (5행부터)
+  const existLast = statsSheet.getLastRow();
+  if (existLast >= 5) statsSheet.getRange(5, 1, existLast - 4, 7).clearContent().clearFormat();
+
+  const months = Object.keys(monthMap).sort();
+  const monthRows = months.map((ym, i) => {
+    const v = monthMap[ym];
+    return [ym, v.inCnt, v.inQty, v.outCnt, v.outQty, v.inQty - v.outQty, ''];
+  });
+
+  if (monthRows.length > 0) {
+    const r = statsSheet.getRange(5, 1, monthRows.length, 7);
+    r.setValues(monthRows);
+    monthRows.forEach((row, i) => {
+      const rowNum = 5 + i;
+      const bg = (i % 2 === 0) ? '#ffffff' : '#FFF3E0';
+      statsSheet.getRange(rowNum, 1, 1, 7).setBackground(bg).setHorizontalAlignment('center');
+      statsSheet.getRange(rowNum, 3).setNumberFormat('#,##0').setFontColor('#1565C0').setFontWeight('bold');
+      statsSheet.getRange(rowNum, 5).setNumberFormat('#,##0').setFontColor('#C62828').setFontWeight('bold');
+      const net = row[5];
+      statsSheet.getRange(rowNum, 6).setNumberFormat('+#,##0;-#,##0;0')
+        .setFontColor(net >= 0 ? '#2E7D32' : '#C62828').setFontWeight('bold');
+      statsSheet.setRowHeight(rowNum, 22);
+    });
+    statsSheet.getRange(5, 1, monthRows.length, 7)
+      .setBorder(true, true, true, true, true, true, '#FFCCBC', SpreadsheetApp.BorderStyle.SOLID);
+
+    // 합계행
+    const sumRow = 5 + monthRows.length;
+    statsSheet.setRowHeight(sumRow, 24);
+    const totalIn  = monthRows.reduce((s, r) => s + r[2], 0);
+    const totalOut = monthRows.reduce((s, r) => s + r[4], 0);
+    statsSheet.getRange(sumRow, 1, 1, 2).merge().setValue('합계').setFontWeight('bold')
+      .setBackground('#BF360C').setFontColor('#ffffff').setHorizontalAlignment('center');
+    statsSheet.getRange(sumRow, 3).setValue(totalIn).setNumberFormat('#,##0')
+      .setFontColor('#1565C0').setFontWeight('bold').setBackground('#FFF3E0').setHorizontalAlignment('center');
+    statsSheet.getRange(sumRow, 4).setValue(monthRows.reduce((s,r)=>s+r[3],0))
+      .setBackground('#FFF3E0').setHorizontalAlignment('center');
+    statsSheet.getRange(sumRow, 5).setValue(totalOut).setNumberFormat('#,##0')
+      .setFontColor('#C62828').setFontWeight('bold').setBackground('#FFF3E0').setHorizontalAlignment('center');
+    statsSheet.getRange(sumRow, 6).setValue(totalIn - totalOut).setNumberFormat('+#,##0;-#,##0;0')
+      .setFontColor((totalIn-totalOut)>=0?'#2E7D32':'#C62828').setFontWeight('bold')
+      .setBackground('#FFF3E0').setHorizontalAlignment('center');
+    statsSheet.getRange(sumRow, 7).setBackground('#FFF3E0');
+  }
+
+  SpreadsheetApp.getUi().alert(`✅ 통계 갱신 완료!\n총 ${months.length}개월 집계`);
+}
+
+// ================================================================
+// 리드보드 갱신
+// ================================================================
+function refreshLeaderboard() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const recordSheet = ss.getSheetByName(SHEET_RECORD);
+  const lbSheet     = ss.getSheetByName(SHEET_LEADERBOARD);
+  if (!recordSheet || !lbSheet) {
+    SpreadsheetApp.getUi().alert('먼저 시스템을 초기화해주세요.');
+    return;
+  }
+
+  const lastRow = recordSheet.getLastRow();
+  if (lastRow < 6) {
+    SpreadsheetApp.getUi().alert('입출고 기록 데이터가 없습니다.');
+    return;
+  }
+
+  const data = recordSheet.getRange(6, 1, lastRow - 5, 10).getValues();
+
+  // 품목별 집계
+  const itemMap = {};
+  // 담당자별 집계
+  const personMap = {};
+
+  data.forEach(row => {
+    const name   = row[3]; if (!name) return;
+    const inQty  = Number(row[6]) || 0;
+    const outQty = Number(row[7]) || 0;
+    const person = row[9] || '미지정';
+
+    if (!itemMap[name]) itemMap[name] = { inQty: 0, outQty: 0, cnt: 0 };
+    itemMap[name].inQty  += inQty;
+    itemMap[name].outQty += outQty;
+    if (inQty > 0 || outQty > 0) itemMap[name].cnt++;
+
+    if (!personMap[person]) personMap[person] = { inQty: 0, outQty: 0, cnt: 0 };
+    personMap[person].inQty  += inQty;
+    personMap[person].outQty += outQty;
+    if (inQty > 0 || outQty > 0) personMap[person].cnt++;
+  });
+
+  // 기존 내용 삭제
+  const existLast = lbSheet.getLastRow();
+  if (existLast >= 3) lbSheet.getRange(3, 1, existLast - 2, 6).clearContent().clearFormat();
+
+  let currentRow = 3;
+
+  // ── 섹션 헬퍼 ──
+  function writeSection(title, bgColor, headers, rows, highlight) {
+    // 섹션 제목
+    lbSheet.getRange(currentRow, 1, 1, 6).merge().setValue(title)
+      .setBackground(bgColor).setFontColor('#ffffff').setFontSize(12).setFontWeight('bold')
+      .setHorizontalAlignment('center').setVerticalAlignment('middle');
+    lbSheet.setRowHeight(currentRow, 28);
+    currentRow++;
+
+    // 헤더
+    lbSheet.getRange(currentRow, 1, 1, headers.length).setValues([headers])
+      .setBackground(_darken(bgColor)).setFontColor('#ffffff').setFontWeight('bold')
+      .setHorizontalAlignment('center').setFontSize(11);
+    lbSheet.setRowHeight(currentRow, 24);
+    currentRow++;
+
+    // 데이터
+    rows.forEach((row, i) => {
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}위`;
+      const fullRow = [medal, ...row];
+      lbSheet.getRange(currentRow, 1, 1, fullRow.length).setValues([fullRow]);
+      const bg = i < 3 ? highlight[i] : (i % 2 === 0 ? '#ffffff' : '#F5F5F5');
+      lbSheet.getRange(currentRow, 1, 1, 6).setBackground(bg).setHorizontalAlignment('center');
+      lbSheet.getRange(currentRow, 2).setHorizontalAlignment('left');
+      lbSheet.getRange(currentRow, 3, 1, 4).setNumberFormat('#,##0');
+      lbSheet.setRowHeight(currentRow, 22);
+      currentRow++;
+    });
+    lbSheet.getRange(currentRow - rows.length - 2, 1, rows.length + 2, 6)
+      .setBorder(true, true, true, true, true, true, '#BDBDBD', SpreadsheetApp.BorderStyle.SOLID);
+    currentRow++; // 빈 행
+    lbSheet.setRowHeight(currentRow - 1, 10);
+  }
+
+  const goldHighlight   = ['#FFF8E1', '#F5F5F5', '#F9F9F9'];
+
+  // ── TOP 5: 입고량 순위 ──
+  const inTop = Object.entries(itemMap)
+    .map(([n, v]) => [n, v.inQty, v.outQty, v.inQty - v.outQty, v.cnt])
+    .sort((a, b) => b[1] - a[1]).slice(0, 5);
+  writeSection('📥 입고량 TOP 5', '#1565C0',
+    ['순위', '품목명', '총 입고', '총 출고', '현재 재고', '거래 건수'],
+    inTop, goldHighlight);
+
+  // ── TOP 5: 출고량 순위 ──
+  const outTop = Object.entries(itemMap)
+    .map(([n, v]) => [n, v.inQty, v.outQty, v.inQty - v.outQty, v.cnt])
+    .sort((a, b) => b[2] - a[2]).slice(0, 5);
+  writeSection('📤 출고량 TOP 5', '#C62828',
+    ['순위', '품목명', '총 입고', '총 출고', '현재 재고', '거래 건수'],
+    outTop, goldHighlight);
+
+  // ── TOP 5: 재고 순위 ──
+  const stockTop = Object.entries(itemMap)
+    .map(([n, v]) => [n, v.inQty, v.outQty, v.inQty - v.outQty, v.cnt])
+    .sort((a, b) => (b[1]-b[2]) - (a[1]-a[2])).slice(0, 5);
+  writeSection('📦 현재 재고 TOP 5', '#2E7D32',
+    ['순위', '품목명', '총 입고', '총 출고', '현재 재고', '거래 건수'],
+    stockTop, goldHighlight);
+
+  // ── 담당자별 처리량 순위 ──
+  const personTop = Object.entries(personMap)
+    .map(([n, v]) => [n, v.inQty, v.outQty, v.inQty + v.outQty, v.cnt])
+    .sort((a, b) => b[3] - a[3]);
+  writeSection('👤 담당자별 처리량 순위', '#4A148C',
+    ['순위', '담당자', '입고 수량', '출고 수량', '총 처리량', '건수'],
+    personTop, goldHighlight);
+
+  SpreadsheetApp.getUi().alert('✅ 리드보드 갱신 완료!');
+}
+
+function _darken(hex) {
+  // 간단한 색상 어둡게 (헤더용)
+  const map = {
+    '#1565C0': '#0D47A1', '#C62828': '#B71C1C', '#2E7D32': '#1B5E20',
+    '#4A148C': '#38006B', '#BF360C': '#870000', '#1A237E': '#0D1B6E',
+    '#E65100': '#BF360C'
+  };
+  return map[hex] || hex;
 }
 
 // ================================================================
