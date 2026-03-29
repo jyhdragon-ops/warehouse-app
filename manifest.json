@@ -1,16 +1,41 @@
 {
   "name": "입출고 대장",
-  "short_name": "입출고",
-  "description": "입출고 관리 앱 — Google Sheets 연동",
-  "start_url": "/warehouse-app/",
-  "scope": "/warehouse-app/",
+  "short_name": "입출고대장",
+  "description": "완제품 입출고 관리 앱",
+  "start_url": "./입출고대장_앱_v2.html",
   "display": "standalone",
-  "orientation": "portrait",
-  "theme_color": "#0F172A",
   "background_color": "#0F172A",
+  "theme_color": "#0F172A",
+  "orientation": "portrait",
   "lang": "ko",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "입고 등록",
+      "short_name": "입고",
+      "description": "새 입고 내역 등록",
+      "url": "./입출고대장_앱_v2.html#in",
+      "icons": [{ "src": "icon-192.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "출고 등록",
+      "short_name": "출고",
+      "description": "새 출고 내역 등록",
+      "url": "./입출고대장_앱_v2.html#out",
+      "icons": [{ "src": "icon-192.svg", "sizes": "192x192" }]
+    }
   ]
 }
