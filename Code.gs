@@ -10,6 +10,100 @@ const SHEET_ITEMS       = '품목 관리';
 const SHEET_STATS       = '통계';
 const SHEET_LEADERBOARD = '리드보드';
 
+// ================================================================
+// 웹앱 핸들러 (모바일 앱 ↔ Sheets 통신)
+// ================================================================
+function doPost(e) {
+  try {
+    const data      = JSON.parse(e.postData.contents);
+    const ss        = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetName = data.sheetName || SHEET_DATA;
+    let   sheet     = ss.getSheetByName(sheetName);
+    if (!sheet) sheet = ss.insertSheet(sheetName);
+
+    const _row = r => [
+      r.id, r.date, r.type === 'in' ? '입고' : '출고',
+      r.item, r.qty, r.unit,
+      r.vendor || '', r.manager || '', r.note || ''
+    ];
+
+    if (data.action === 'ping') {
+      return _json({ status: 'ok', message: '연결 성공!' });
+    }
+
+    if (data.action === 'append') {
+      sheet.appendRow(_row(data));
+      return _json({ status: 'ok' });
+    }
+
+    if (data.action === 'appendBatch') {
+      data.rows.forEach(r => sheet.appendRow(_row(r)));
+      return _json({ status: 'ok', count: data.rows.length });
+    }
+
+    if (data.action === 'update') {
+      const values = sheet.getDataRange().getValues();
+      for (let i = 1; i < values.length; i++) {
+        if (String(values[i][0]) === String(data.id)) {
+          sheet.getRange(i + 1, 1, 1, 9).setValues([_row(data)]);
+          break;
+        }
+      }
+      return _json({ status: 'ok' });
+    }
+
+    if (data.action === 'delete') {
+      const values = sheet.getDataRange().getValues();
+      for (let i = values.length - 1; i >= 1; i--) {
+        if (String(values[i][0]) === String(data.id)) {
+          sheet.deleteRow(i + 1);
+          break;
+        }
+      }
+      return _json({ status: 'ok' });
+    }
+
+    return _json({ status: 'error', message: '알 수 없는 action' });
+  } catch (err) {
+    return _json({ status: 'error', message: err.toString() });
+  }
+}
+
+function doGet(e) {
+  try {
+    const ss        = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetName = (e.parameter && e.parameter.sheetName) || SHEET_DATA;
+    const sheet     = ss.getSheetByName(sheetName);
+    if (!sheet || sheet.getLastRow() < 2) return _json({ status: 'ok', rows: [] });
+
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 9).getValues();
+    const rows   = values
+      .filter(r => r[0])
+      .map(r => ({
+        id:      String(r[0]),
+        date:    r[1] instanceof Date
+                   ? Utilities.formatDate(r[1], Session.getScriptTimeZone(), 'yyyy-MM-dd')
+                   : String(r[1]),
+        type:    r[2] === '입고' ? 'in' : 'out',
+        item:    String(r[3]),
+        qty:     Number(r[4]),
+        unit:    String(r[5]),
+        vendor:  String(r[6] || ''),
+        manager: String(r[7] || ''),
+        note:    String(r[8] || '')
+      }));
+    return _json({ status: 'ok', rows });
+  } catch (err) {
+    return _json({ status: 'error', message: err.toString() });
+  }
+}
+
+function _json(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
 // ── 메뉴 등록 ──────────────────────────────────────────────────
 function onOpen() {
   SpreadsheetApp.getUi()
