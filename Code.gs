@@ -19,6 +19,7 @@ function onOpen() {
     .addItem('➕ 입고 등록', 'showInboundDialog')
     .addItem('➖ 출고 등록', 'showOutboundDialog')
     .addSeparator()
+    .addItem('📑 입출고 기록 동기화', 'syncToRecord')
     .addItem('🔄 재고 현황 갱신', 'refreshStock')
     .addItem('📊 통계 갱신', 'refreshStats')
     .addItem('🏆 리드보드 갱신', 'refreshLeaderboard')
@@ -275,6 +276,71 @@ function _setLabelCell(sheet, cell, value) {
   sheet.getRange(cell).setValue(value)
     .setFontWeight('bold').setBackground('#e8eaf6')
     .setBorder(true,true,true,true,false,false);
+}
+
+// ================================================================
+// 입출고대장 → 입출고 기록 동기화
+// ================================================================
+function syncToRecord() {
+  const ss          = SpreadsheetApp.getActiveSpreadsheet();
+  const dataSheet   = ss.getSheetByName(SHEET_DATA);
+  const recordSheet = ss.getSheetByName(SHEET_RECORD);
+
+  if (!dataSheet) {
+    SpreadsheetApp.getUi().alert('입출고대장 시트가 없습니다. 앱에서 데이터를 먼저 입력하세요.');
+    return;
+  }
+  if (!recordSheet) {
+    SpreadsheetApp.getUi().alert('입출고 기록 시트가 없습니다. 시스템 초기화를 먼저 실행하세요.');
+    return;
+  }
+  if (dataSheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('입출고대장 데이터가 없습니다.');
+    return;
+  }
+
+  // 입출고대장 데이터 읽기 (헤더 제외, 행2~)
+  // 컬럼: [id, 날짜, 구분, 품목, 수량, 단위, 입고처, 담당자, 비고]
+  const src = dataSheet.getRange(2, 1, dataSheet.getLastRow() - 1, 9).getValues();
+
+  // 날짜순 정렬
+  src.sort((a, b) => {
+    const da = a[1] instanceof Date ? a[1] : new Date(a[1]);
+    const db = b[1] instanceof Date ? b[1] : new Date(b[1]);
+    return da - db;
+  });
+
+  // 입출고 기록 시트 데이터 영역(6행~55행) 클리어
+  recordSheet.getRange(6, 2, 50, 9).clearContent();
+
+  const maxRows = Math.min(src.length, 50); // 대장 양식은 50행
+  for (let i = 0; i < maxRows; i++) {
+    const row    = src[i];
+    const rowNum = 6 + i;
+    const date   = row[1];
+    const type   = row[2]; // '입고' or '출고'
+    const item   = row[3];
+    const qty    = Number(row[4]) || 0;
+    const unit   = row[5];
+    const person = row[7];
+    const note   = row[8];
+
+    const inQty  = type === '입고' ? qty : 0;
+    const outQty = type === '출고' ? qty : 0;
+
+    recordSheet.getRange(rowNum, 2).setValue(date).setNumberFormat('yyyy-mm-dd');
+    recordSheet.getRange(rowNum, 3).setValue(type);
+    recordSheet.getRange(rowNum, 4).setValue(item);
+    recordSheet.getRange(rowNum, 5).setValue('');   // 규격/사양 (앱에 없음)
+    recordSheet.getRange(rowNum, 6).setValue(unit);
+    if (inQty  > 0) recordSheet.getRange(rowNum, 7).setValue(inQty);
+    if (outQty > 0) recordSheet.getRange(rowNum, 8).setValue(outQty);
+    recordSheet.getRange(rowNum, 10).setValue(person);
+    recordSheet.getRange(rowNum, 11).setValue(note);
+  }
+
+  const skipped = src.length > 50 ? `\n※ 데이터가 50건을 초과해 최근 50건만 표시됩니다.` : '';
+  SpreadsheetApp.getUi().alert(`✅ 동기화 완료!\n총 ${maxRows}건 반영${skipped}`);
 }
 
 // ================================================================
