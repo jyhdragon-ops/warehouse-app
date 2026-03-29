@@ -4,6 +4,7 @@
 // ================================================================
 
 const SHEET_RECORD      = '입출고 기록';
+const SHEET_DATA        = '입출고대장';   // 앱에서 실제 데이터가 쌓이는 시트
 const SHEET_STOCK       = '재고 현황';
 const SHEET_ITEMS       = '품목 관리';
 const SHEET_STATS       = '통계';
@@ -281,50 +282,47 @@ function _setLabelCell(sheet, cell, value) {
 // ================================================================
 function refreshStock() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const recordSheet = ss.getSheetByName(SHEET_RECORD);
-  const stockSheet  = ss.getSheetByName(SHEET_STOCK);
-  if (!recordSheet || !stockSheet) {
+  const dataSheet  = ss.getSheetByName(SHEET_DATA);
+  const stockSheet = ss.getSheetByName(SHEET_STOCK);
+  if (!stockSheet) {
     SpreadsheetApp.getUi().alert('먼저 시스템을 초기화해주세요.');
     return;
   }
-
-  const lastRow = recordSheet.getLastRow();
-  if (lastRow < 6) {
-    SpreadsheetApp.getUi().alert('입출고 기록 데이터가 없습니다.');
+  if (!dataSheet || dataSheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('입출고대장 데이터가 없습니다.');
     return;
   }
 
-  const data = recordSheet.getRange(6, 1, lastRow - 5, 9).getValues();
+  // 입출고대장 컬럼: [id, 날짜, 구분, 품목, 수량, 단위, 입고처, 담당자, 비고]
+  const data = dataSheet.getRange(2, 1, dataSheet.getLastRow() - 1, 9).getValues();
   const map = {};
 
   data.forEach(row => {
-    const type = row[2]; const name = row[3]; const spec = row[4];
-    const unit = row[5]; const inQty = Number(row[6])||0; const outQty = Number(row[7])||0;
+    const type   = row[2]; // '입고' or '출고'
+    const name   = row[3];
+    const qty    = Number(row[4]) || 0;
+    const unit   = row[5];
     if (!name) return;
-    if (!map[name]) map[name] = { spec, unit, inQty: 0, outQty: 0 };
-    map[name].inQty  += inQty;
-    map[name].outQty += outQty;
+    if (!map[name]) map[name] = { unit, inQty: 0, outQty: 0 };
+    if (type === '입고') map[name].inQty  += qty;
+    else                 map[name].outQty += qty;
   });
 
-  // 기존 데이터 지우기 (4행부터)
   const existingRows = stockSheet.getLastRow();
   if (existingRows >= 4) stockSheet.getRange(4, 1, existingRows - 3, 6).clearContent().clearFormat();
 
-  const rows = Object.entries(map).map(([name, v], i) => {
-    const bg = (i % 2 === 0) ? '#ffffff' : '#f1f8e9';
-    return [name, v.spec, v.unit, v.inQty, v.outQty, v.inQty - v.outQty];
-  });
+  const rows = Object.entries(map).map(([name, v]) =>
+    [name, '-', v.unit, v.inQty, v.outQty, v.inQty - v.outQty]
+  );
 
   if (rows.length > 0) {
     stockSheet.getRange(4, 1, rows.length, 6).setValues(rows);
-    rows.forEach((_, i) => {
-      const r = 4 + i;
+    rows.forEach((row, i) => {
+      const r  = 4 + i;
       const bg = (i % 2 === 0) ? '#ffffff' : '#f1f8e9';
       stockSheet.getRange(r, 1, 1, 6).setBackground(bg);
       stockSheet.getRange(r, 4, 1, 3).setNumberFormat('#,##0').setHorizontalAlignment('right');
-      // 재고 0 이하 강조
-      const stock = rows[i][5];
-      if (stock <= 0) stockSheet.getRange(r, 6).setBackground('#ffcdd2').setFontColor('#c62828').setFontWeight('bold');
+      if (row[5] <= 0) stockSheet.getRange(r, 6).setBackground('#ffcdd2').setFontColor('#c62828').setFontWeight('bold');
       stockSheet.setRowHeight(r, 22);
     });
     stockSheet.getRange(4, 1, rows.length, 6)
@@ -400,20 +398,19 @@ function _createLeaderboardSheet(ss) {
 // ================================================================
 function refreshStats() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const recordSheet = ss.getSheetByName(SHEET_RECORD);
-  const statsSheet  = ss.getSheetByName(SHEET_STATS);
-  if (!recordSheet || !statsSheet) {
+  const dataSheet  = ss.getSheetByName(SHEET_DATA);
+  const statsSheet = ss.getSheetByName(SHEET_STATS);
+  if (!statsSheet) {
     SpreadsheetApp.getUi().alert('먼저 시스템을 초기화해주세요.');
     return;
   }
-
-  const lastRow = recordSheet.getLastRow();
-  if (lastRow < 6) {
-    SpreadsheetApp.getUi().alert('입출고 기록 데이터가 없습니다.');
+  if (!dataSheet || dataSheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('입출고대장 데이터가 없습니다.');
     return;
   }
 
-  const data = recordSheet.getRange(6, 1, lastRow - 5, 10).getValues();
+  // 입출고대장 컬럼: [id, 날짜, 구분, 품목, 수량, 단위, 입고처, 담당자, 비고]
+  const data = dataSheet.getRange(2, 1, dataSheet.getLastRow() - 1, 9).getValues();
 
   // 월별 집계
   const monthMap = {};
@@ -421,12 +418,12 @@ function refreshStats() {
     const date = row[1]; if (!date) return;
     const d = (date instanceof Date) ? date : new Date(date);
     if (isNaN(d)) return;
-    const ym = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM');
-    const inQty  = Number(row[6]) || 0;
-    const outQty = Number(row[7]) || 0;
+    const ym    = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM');
+    const type  = row[2]; // '입고' or '출고'
+    const qty   = Number(row[4]) || 0;
     if (!monthMap[ym]) monthMap[ym] = { inCnt: 0, inQty: 0, outCnt: 0, outQty: 0 };
-    if (inQty  > 0) { monthMap[ym].inCnt++;  monthMap[ym].inQty  += inQty;  }
-    if (outQty > 0) { monthMap[ym].outCnt++; monthMap[ym].outQty += outQty; }
+    if (type === '입고') { monthMap[ym].inCnt++;  monthMap[ym].inQty  += qty; }
+    else                 { monthMap[ym].outCnt++; monthMap[ym].outQty += qty; }
   });
 
   // 기존 데이터 삭제 (5행부터)
@@ -483,41 +480,42 @@ function refreshStats() {
 // ================================================================
 function refreshLeaderboard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const recordSheet = ss.getSheetByName(SHEET_RECORD);
-  const lbSheet     = ss.getSheetByName(SHEET_LEADERBOARD);
-  if (!recordSheet || !lbSheet) {
+  const dataSheet = ss.getSheetByName(SHEET_DATA);
+  const lbSheet   = ss.getSheetByName(SHEET_LEADERBOARD);
+  if (!lbSheet) {
     SpreadsheetApp.getUi().alert('먼저 시스템을 초기화해주세요.');
     return;
   }
-
-  const lastRow = recordSheet.getLastRow();
-  if (lastRow < 6) {
-    SpreadsheetApp.getUi().alert('입출고 기록 데이터가 없습니다.');
+  if (!dataSheet || dataSheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('입출고대장 데이터가 없습니다.');
     return;
   }
 
-  const data = recordSheet.getRange(6, 1, lastRow - 5, 10).getValues();
+  // 입출고대장 컬럼: [id, 날짜, 구분, 품목, 수량, 단위, 입고처, 담당자, 비고]
+  const data = dataSheet.getRange(2, 1, dataSheet.getLastRow() - 1, 9).getValues();
 
   // 품목별 집계
-  const itemMap = {};
+  const itemMap   = {};
   // 담당자별 집계
   const personMap = {};
 
   data.forEach(row => {
     const name   = row[3]; if (!name) return;
-    const inQty  = Number(row[6]) || 0;
-    const outQty = Number(row[7]) || 0;
-    const person = row[9] || '미지정';
+    const type   = row[2]; // '입고' or '출고'
+    const qty    = Number(row[4]) || 0;
+    const person = row[7] || '미지정';
+    const inQty  = type === '입고' ? qty : 0;
+    const outQty = type === '출고' ? qty : 0;
 
     if (!itemMap[name]) itemMap[name] = { inQty: 0, outQty: 0, cnt: 0 };
     itemMap[name].inQty  += inQty;
     itemMap[name].outQty += outQty;
-    if (inQty > 0 || outQty > 0) itemMap[name].cnt++;
+    if (qty > 0) itemMap[name].cnt++;
 
     if (!personMap[person]) personMap[person] = { inQty: 0, outQty: 0, cnt: 0 };
     personMap[person].inQty  += inQty;
     personMap[person].outQty += outQty;
-    if (inQty > 0 || outQty > 0) personMap[person].cnt++;
+    if (qty > 0) personMap[person].cnt++;
   });
 
   // 기존 내용 삭제
