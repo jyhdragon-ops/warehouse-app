@@ -2,7 +2,7 @@
 const CACHE_NAME = 'ipchulgo-v2';
 const ASSETS = [
   './',
-  './입출고대장_앱_v2.html',
+  './index.html',
   './manifest.json',
   './icon-192.svg',
   './icon-512.svg',
@@ -56,7 +56,7 @@ self.addEventListener('fetch', event => {
       }).catch(() => {
         // 오프라인 시 HTML 요청은 메인 페이지 반환
         if (event.request.destination === 'document') {
-          return caches.match('./입출고대장_앱_v2.html');
+          return caches.match('./index.html');
         }
       });
     })
